@@ -4,7 +4,7 @@ spring:
     name: catalogue
 
   datasource:
-      url: jdbc:postgresql://localhost:5432/catalogue
+      url: jdbc:postgresql://${host}:5432/catalogue
       username: catalogue
       password: catalogue
 
