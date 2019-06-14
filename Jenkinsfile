@@ -1,4 +1,7 @@
 node {
+        environment { 
+            host = 'localhost'
+        }
         stage("Checkout") {
             checkout scm
         }
