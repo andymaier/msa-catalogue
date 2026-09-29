@@ -1,7 +1,7 @@
 # msa-catalogue (Python)
 
 Python-Portierung des Java/Spring-Boot-Service `catalogue` aus dem
-predic8-MSA-Shop. Flask (REST) + kafka-python (Event-Anbindung) + PostgreSQL.
+predic8-MSA-Shop. Flask (REST) + confluent-kafka (Event-Anbindung) + PostgreSQL.
 
 ## Architektur
 - REST `GET /articles`, `GET /articles/count` (nur lesend).

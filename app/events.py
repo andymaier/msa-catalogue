@@ -1,14 +1,9 @@
-"""Kafka-Anbindung: Operation-Event, Producer und ShopListener.
-
-TODO (Uebung): den Listener implementieren - die Verarbeitung eines
-Operation-Events und die Pflege des Artikel-Stores.
-"""
 import json
 import threading
 from dataclasses import dataclass
 from typing import Any
 
-from kafka import KafkaConsumer, KafkaProducer
+from confluent_kafka import Consumer, Producer, KafkaException
 
 from .config import KAFKA_BOOTSTRAP_SERVERS, SHOP_TOPIC, KAFKA_GROUP_ID
 from .db import ArticleRepository
@@ -16,10 +11,9 @@ from .db import ArticleRepository
 
 @dataclass
 class Operation:
-    """Event-Nachricht auf dem Topic 'shop' (wie im Java-Original)."""
-    bo: str            # Business-Objekt, z.B. "article"
-    action: str        # "create" | "update" | "delete"
-    object: Any = None # Nutzdaten als dict
+    bo: str
+    action: str
+    object: Any = None
 
     @staticmethod
     def from_bytes(raw: bytes) -> "Operation":
@@ -33,21 +27,32 @@ class Operation:
 
 
 class ShopProducer:
-    """Sendet Operation-Events auf das Topic 'shop' (vorgegeben)."""
+    """Sendet Operation-Events auf 'shop' (confluent-kafka). Verbindung wird
+    verzoegert aufgebaut, damit die App auch ohne laufendes Kafka startet."""
 
     def __init__(self):
-        self._producer = KafkaProducer(
-            bootstrap_servers=KAFKA_BOOTSTRAP_SERVERS,
-            value_serializer=lambda op: op.to_bytes(),
-        )
+        self._producer = None
 
-    def send(self, op: Operation):
-        self._producer.send(SHOP_TOPIC, op).get(timeout=10)
+    def _get(self):
+        if self._producer is None:
+            self._producer = Producer({"bootstrap.servers": KAFKA_BOOTSTRAP_SERVERS})
+        return self._producer
+
+    def send(self, op: "Operation"):
+        errors = []
+
+        def _cb(err, msg):
+            if err is not None:
+                errors.append(err)
+
+        p = self._get()
+        p.produce(SHOP_TOPIC, value=op.to_bytes(), on_delivery=_cb)
+        p.flush(10)
+        if errors:
+            raise KafkaException(errors[0])
 
 
 class ShopListener:
-    """Konsumiert Events vom Topic 'shop' und pflegt den Artikel-Store."""
-
     def __init__(self, repo: ArticleRepository):
         self.repo = repo
 
@@ -59,19 +64,25 @@ class ShopListener:
         raise NotImplementedError("ShopListener.handle noch nicht implementiert")
 
     def start(self):
-        """Startet den Consumer in einem Hintergrund-Thread."""
         threading.Thread(target=self._consume, daemon=True).start()
 
     def _consume(self):
-        consumer = KafkaConsumer(
-            SHOP_TOPIC,
-            bootstrap_servers=KAFKA_BOOTSTRAP_SERVERS,
-            group_id=KAFKA_GROUP_ID,
-            auto_offset_reset="earliest",
-            value_deserializer=Operation.from_bytes,
+        consumer = Consumer(
+            {
+                "bootstrap.servers": KAFKA_BOOTSTRAP_SERVERS,
+                "group.id": KAFKA_GROUP_ID,
+                "auto.offset.reset": "earliest",
+            }
         )
-        for msg in consumer:
+        consumer.subscribe([SHOP_TOPIC])
+        while True:
+            msg = consumer.poll(1.0)
+            if msg is None:
+                continue
+            if msg.error():
+                print(f"[catalogue] Consumer-Fehler: {msg.error()}")
+                continue
             try:
-                self.handle(msg.value)
-            except Exception as e:  # im Uebungsstand erwartet (TODO)
+                self.handle(Operation.from_bytes(msg.value()))
+            except Exception as e:
                 print(f"[catalogue] Fehler beim Verarbeiten: {e}")

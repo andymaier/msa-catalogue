@@ -1,4 +1,4 @@
 Flask==3.0.3
-kafka-python==2.0.2
+confluent-kafka==2.5.3
 psycopg2-binary==2.9.9
 SQLAlchemy==2.0.34
